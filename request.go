@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"math/big"
+	"bytes"
 
 	"golang.org/x/net/context"
 )
@@ -356,9 +358,135 @@ type closeWriter interface {
 // proxy is used to suffle data from src to destination, and sends errors
 // down a dedicated channel
 func proxy(dst io.Writer, src io.Reader, errCh chan error) {
-	_, err := io.Copy(dst, src)
+	//_, err := io.Copy(dst, src)
+	_, err := copyAndModify(dst, src)
 	if tcpConn, ok := dst.(closeWriter); ok {
 		tcpConn.CloseWrite()
 	}
 	errCh <- err
+}
+
+func copyAndModify(dst io.Writer, src io.Reader) (written int64, err error) {
+	// based on copyBuffer in io.go
+	buf := make([]byte, 32*1024)
+	for {
+		nr, er := src.Read(buf)
+		if written == 0 && nr > 0 {
+			if (buf[0] == 0x16 && buf[5] == 0x01) {// && buf[1] == 0x03 && buf[2] == 0x01) {
+				modifyHello(buf);
+			}
+		}
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+	}
+	return written, err
+}
+
+func modifyHello(buf []byte) {
+
+	// 1 byte content type
+
+	// 2 byte tls version
+
+	// 2 byte tls frame length
+	frameLength := big.NewInt(0)
+	frameLength.SetBytes(buf[3:5])
+
+	// 1 byte handshake type
+
+	// 3 byte handshake length
+	handshakeLength := big.NewInt(0)
+	handshakeLength.SetBytes(buf[6:9])
+
+	// 2 byte version
+
+	// 32 byte random
+
+	// 1 byte session id length
+	sessionLength := big.NewInt(0)
+	sessionLength.SetBytes(buf[43:44])
+
+	// session id
+
+	// 2 byte cipher suites length (in bytes)
+	suitesLength := big.NewInt(0)
+	suitesLength.SetBytes(buf[44+sessionLength.Uint64():44+sessionLength.Uint64()+2])
+
+	// cipher suites
+
+	// 1 byte compression methods length
+
+	// 1 byte compression method
+
+	// 2 byte extensions length
+	extensionsLength := big.NewInt(0)
+	extensionsLength.SetBytes(buf[48+sessionLength.Uint64()+suitesLength.Uint64():48+sessionLength.Uint64()+suitesLength.Uint64()+2])
+
+	// extensions:
+
+	extensionsStart := 50 + sessionLength.Uint64() + suitesLength.Uint64()
+	extensionsEnd := extensionsStart + extensionsLength.Uint64()
+	cur := extensionsStart
+	for cur + 4 < extensionsEnd {
+		if (buf[cur] != 0x00 || buf[cur + 1] != 0x00) {
+			extensionLength := big.NewInt(0)
+			extensionLength.SetBytes(buf[cur+2:cur+4])
+			cur += 4 + extensionLength.Uint64()
+			continue
+		}
+
+		// yay is sni header!
+		extensionLength := big.NewInt(0)
+		extensionLength.SetBytes(buf[cur+2:cur+4])
+
+		// 2 byte sni list length
+		listLength := big.NewInt(0)
+		listLength.SetBytes(buf[cur+4:cur+6])
+
+		var list []string
+
+		listStart := cur + 6
+		listEnd := cur + 6 + listLength.Uint64()
+		lcur := listStart
+		for lcur + 3 < listEnd {
+			// 1 byte type
+			// 2 byte length
+			nameLength := big.NewInt(0)
+			nameLength.SetBytes(buf[lcur+1:lcur+3])
+			//buf[lcur+3] = 'x'
+			// name
+			var name bytes.Buffer
+			name.Write(buf[lcur+3:lcur+3+nameLength.Uint64()])
+			name.WriteByte(0)
+			// append to list
+			list = append(list, name.String())
+			lcur += 3 + nameLength.Uint64()
+		}
+		fmt.Println(list)
+
+		break
+	}
+
+	//     2 byte extension type
+	//     2 byte extension length
+	//     extension data
+	
 }
