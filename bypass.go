@@ -5,8 +5,7 @@ import (
 )
 
 func main() {
-	conf := &socks.Config{
-	}
+	conf := &socks.Config{}
 	server, err := socks.New(conf)
 	if err != nil {
 		panic(err)
