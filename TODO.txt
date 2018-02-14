@@ -1,0 +1,10 @@
+
+Generate files:
+	https://github.com/coreos/etcd-ca/tree/master/pkix
+	Generate CA ecdsa keypair
+	Generate server ecdsa keypair
+
+Prompt user to install CA cert:
+	https://github.com/skratchdot/open-golang
+
+
